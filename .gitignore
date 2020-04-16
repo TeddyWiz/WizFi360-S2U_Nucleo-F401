@@ -3,7 +3,7 @@ WizFi360-S2U_Nucleo-F401/MDK-ARM/WizFi360-S2U_Nucleo-F401/
 
 ## Project File
 *.uvguix.*
-#*.uvoptx
+*.uvoptx
 #*.uvprojx
 WizFi360-S2U_Nucleo-F401/MDK-ARM/*.scvd
 WizFi360-S2U_Nucleo-F401/MDK-ARM/DebugConfig
