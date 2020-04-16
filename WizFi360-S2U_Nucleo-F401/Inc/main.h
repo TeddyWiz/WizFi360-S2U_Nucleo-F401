@@ -54,7 +54,8 @@ extern "C" {
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
-
+void uart2_recv_func(uint8_t Data);
+void uart6_recv_func(uint8_t Data);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/

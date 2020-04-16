@@ -85,7 +85,7 @@ void NMI_Handler(void)
 void HardFault_Handler(void)
 {
   /* USER CODE BEGIN HardFault_IRQn 0 */
-
+	printf("Hard Fault\r\n");
   /* USER CODE END HardFault_IRQn 0 */
   while (1)
   {
@@ -246,7 +246,14 @@ void SPI1_IRQHandler(void)
 void USART2_IRQHandler(void)
 {
   /* USER CODE BEGIN USART2_IRQn 0 */
-
+	#if 1
+  if((__HAL_UART_GET_FLAG(&huart2, UART_FLAG_RXNE) != RESET))
+  {
+	  uart2_recv_func((uint8_t)(huart2.Instance->DR & (uint8_t)0x00FF));
+  }
+  __HAL_UART_CLEAR_PEFLAG(&huart2);
+#endif
+  
   /* USER CODE END USART2_IRQn 0 */
   HAL_UART_IRQHandler(&huart2);
   /* USER CODE BEGIN USART2_IRQn 1 */
@@ -274,7 +281,14 @@ void EXTI15_10_IRQHandler(void)
 void USART6_IRQHandler(void)
 {
   /* USER CODE BEGIN USART6_IRQn 0 */
-
+#if 1
+  if((__HAL_UART_GET_FLAG(&huart6, UART_FLAG_RXNE) != RESET))
+  {
+	  //uart2_recv_func((uint8_t)(huart2.Instance->DR & (uint8_t)0x00FF));
+    uart6_recv_func((uint8_t)(huart6.Instance->DR & (uint8_t)0x00FF));
+  }
+  __HAL_UART_CLEAR_PEFLAG(&huart6);
+#endif
   /* USER CODE END USART6_IRQn 0 */
   HAL_UART_IRQHandler(&huart6);
   /* USER CODE BEGIN USART6_IRQn 1 */

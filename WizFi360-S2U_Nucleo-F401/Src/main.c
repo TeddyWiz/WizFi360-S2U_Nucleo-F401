@@ -23,16 +23,36 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "stdio.h"
+#include "string.h"
+#include "stdlib.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+#define SPI_RX_DESC_NUM			10
 
+#define SPI_REG_TIMEOUT			200
+#define SPI_TIMEOUT				100		// 200mS
+
+#define SPI_REG_INT_STTS		0x06
+#define SPI_REG_RX_DAT_LEN		0x02
+#define SPI_REG_TX_BUFF_AVAIL	0x03
+#define SPI_CMD_RX_DATA			0x10
+#define SPI_CMD_TX_CMD			0x91
+#define SPI_CMD_TX_DATA			0x90
+#define SPI_CS_OFF				HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_RESET)
+#define SPI_CS_ON				HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET)
+#define SPI_INT_STTS			HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_8)
+
+
+#define debug 					0
+#define debug1 					0
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define KEIL //KEIL ,True_STD
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -47,7 +67,21 @@ UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart6;
 
 /* USER CODE BEGIN PV */
-
+uint8_t RX_BUFFER[512];
+uint8_t RX_BUFFER_U6[512];
+uint8_t SPI_TX_BUFF[1048];
+uint8_t SPI_RX_BUFF[1048];
+uint8_t RX_Flag = 0;
+uint16_t RX_Index = 0;
+uint8_t RX_Flag_U6 = 0;
+uint16_t RX_Index_U6 = 0;
+uint8_t Spi_rx_flag = 0;
+uint8_t transmode = 0;
+uint8_t sendmode = 0;
+int sendsize = 0;
+uint8_t WizFi360_Boot = 0;
+uint16_t TransBootCnt = 0;
+uint16_t recv_cnt = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -57,12 +91,95 @@ static void MX_SPI1_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_USART6_UART_Init(void);
 /* USER CODE BEGIN PFP */
+int Int2StrNull(char *data);
+void SPI_SEND(uint8_t type, uint8_t *data, uint16_t len);
+int CMD_check_mode(void);
+int recv_check_message(void);
+int SPI_RECV(void);
+uint16_t SPI_Read_Register(uint8_t CMD);
+uint16_t  SPI_Read_STTS(void);
+#ifdef KEIL
+     #ifdef __GNUC__
+     //With GCC, small printf (option LD Linker->Libraries->Small printf
+     //set to 'Yes') calls __io_putchar()
+         #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
+		#else
+				 #define PUTCHAR_PROTOTYPE int fputc(int ch, FILE *f)
+		#endif /* __GNUC__*/
+#if 1
+PUTCHAR_PROTOTYPE
+{
+	HAL_UART_Transmit(&huart6, (uint8_t *)&ch, 1, 0xFFFF);
+	return ch;
+}
+				 #endif
+#endif			 
 
+#ifdef True_STD
+int _write(int fd, char *str, int len)
+{
+	for(int i=0; i<len; i++)
+	{
+		HAL_UART_Transmit(&huart2, (uint8_t *)&str[i], 1, 0xFFFF);
+	}
+	return len;
+}
+#endif
+uint8_t rxData;
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+
+	/*
+			This will be called once data is received successfully,
+			via interrupts.
+	*/
+
+	 /*
+		 loop back received data
+	 */
+		
+}
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+	if(GPIO_Pin == GPIO_PIN_8)
+	{
+		Spi_rx_flag = 1;
+	}
+}
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+void uart2_recv_func(uint8_t Data)
+{
+  RX_BUFFER[RX_Index++] = Data;
+	if(Data == '\n')
+	{
+    RX_BUFFER[RX_Index] = 0;
+		RX_Flag = 1;
+	}
+  else if (RX_Index==3&&(RX_BUFFER[0]=='+')&&(RX_BUFFER[1]=='+')&&(RX_BUFFER[2]=='+'))
+  {
+    transmode = 0;
+    RX_BUFFER[RX_Index] = 0;
+		RX_Flag = 1;
+  }  
+  else if((sendmode == 1)&&(RX_Index >= sendsize))
+  {
+    RX_BUFFER[RX_Index] = 0;
+		RX_Flag = 1;
+    sendmode = 0;
+    sendsize = 0;
+  }
+}
+void uart6_recv_func(uint8_t Data)
+{
+  RX_BUFFER_U6[RX_Index_U6++] = Data;
+	if(Data == '\r')
+	{
+    RX_BUFFER_U6[RX_Index_U6] = 0;
+		RX_Flag_U6 = 1;
+	}
+}
 /* USER CODE END 0 */
 
 /**
@@ -72,7 +189,9 @@ static void MX_USART6_UART_Init(void);
 int main(void)
 {
   /* USER CODE BEGIN 1 */
-
+  int temp_delay = 60000;
+  int temp_cnt = 0;
+  int SPI_RECV_LEN = 0;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -97,13 +216,62 @@ int main(void)
   MX_USART2_UART_Init();
   MX_USART6_UART_Init();
   /* USER CODE BEGIN 2 */
-
+	HAL_UART_Receive_IT(&huart2, &rxData, 1);
+  HAL_UART_Receive_IT(&huart6, &rxData, 1);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+	
+  HAL_Delay(1000);
+	printf("----------------------------------------------------\r\n");
+	printf("||         WizFi360 SPI to UART Test Program       ||\r\n");
+	printf("||                   Ver 0.1                       ||\r\n");
+	printf("----------------------------------------------------\r\n");
   while (1)
   {
+    if(RX_Flag == 1)
+    {
+      printf("%s",RX_BUFFER);
+      if(transmode == 1)
+      {
+        //
+      }else if (sendmode == 1)
+      {
+        //
+      }
+      else
+      {
+        CMD_check_mode();
+      }
+      SPI_SEND(0, RX_BUFFER, RX_Index);
+      RX_Flag = 0;
+      RX_Index = 0;
+    }
+    
+    if(Spi_rx_flag||(SPI_INT_STTS == 0))
+    {
+      SPI_RECV_LEN = SPI_RECV();
+      if(SPI_RECV_LEN>0)
+      {
+        recv_check_message();
+      }
+      Spi_rx_flag = 0;
+    }
+    if(RX_Flag_U6 == 1)
+    {
+      printf("%s",RX_BUFFER_U6);
+      if(strncmp((char *)RX_BUFFER_U6, "check", 5) == 0)
+      {
+        SPI_Read_STTS();
+      }
+      RX_Flag_U6 = 0;
+      RX_Index_U6 = 0;
+    }
+    if(--temp_cnt <= 0)
+    {
+      temp_cnt = 900000;
+    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -306,6 +474,344 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+// int to string untill null
+int Int2StrNull(char *data)
+{
+  char temp_data[5];
+  int temp_cnt = 0;
+  int result = 0;
+  while(!((*data == NULL)||(*data == '\r')||(*data == '\n')))
+  {
+    //str to int
+    temp_data[temp_cnt++] = *data;
+    data++;
+    if(temp_cnt>5)
+      return -1;
+  }
+  temp_data[temp_cnt]=0;
+  result = atoi(temp_data);
+  return result;
+}
+//SPI Read Register
+uint16_t SPI_Read_Register(uint8_t CMD)
+{
+  uint8_t dum = 0xFF,rx_temp[2]={0,};
+  uint16_t ret = 0;
+  HAL_SPI_TransmitReceive(&hspi1, &CMD, &dum, 1, 10);
+  dum = 0xFF;
+  #if 1
+  HAL_SPI_TransmitReceive(&hspi1, &dum, &rx_temp[0], 1, 10);
+  HAL_SPI_TransmitReceive(&hspi1, &dum, &rx_temp[1], 1, 10);
+  #else
+  HAL_SPI_TransmitReceive(&hspi1, &dum, rx_temp, 2, 10);
+  #endif
+  ret = rx_temp[0] | (rx_temp[1] << 8);
+  return ret;
+}
+//SPI SEND Message
+void SPI_SEND(uint8_t type, uint8_t *data, uint16_t len)
+{
+  #if 1
+  //int i;
+  //HAL_UART_Transmit(&huart1, data, len, 0xFFFF);
+  //read TX_BUFF_AVAIL
+  uint8_t temp_CMD, retry = 0, err = 0, dum2=0x00;
+  uint16_t SPI_RX_REG = 0, TX_len;
+  int temp_delay = 10000;
+  memset(SPI_TX_BUFF,0, sizeof(SPI_TX_BUFF));
+  
+  temp_CMD = SPI_REG_TX_BUFF_AVAIL;
+  
+  while((SPI_RX_REG != 0xffff) && (0 == (SPI_RX_REG & 0x02)))
+  {
+    retry++;
+		SPI_CS_OFF;
+    SPI_RX_REG = SPI_Read_Register(temp_CMD);
+		SPI_CS_ON;
+    #if 1
+		printf("SPI_REG_TX_BUFF_AVAIL[%d]\r\n", SPI_RX_REG);
+    #endif
+    if(retry > SPI_TIMEOUT)
+    {
+      printf("SPI CMD timeout-------------------------------------------\r\n");
+      retry = 0;
+      err = 1;
+      break;
+    }
+    #if 1
+		printf("SPI SEND Retry[%d]\r\n", retry);
+    #endif
+    while(--temp_delay > 1);
+    temp_delay = 10000;
+  }
+  
+  TX_len = len + 2;
+  if(TX_len % 4)
+  {
+    TX_len = ((TX_len + 3)/4) << 2;
+    //TX_len = (TX_len + 3) & 0xFFFC;
+  }
+  //printf("SPI_REG_TX_BUFF_AVAIL[%d]\r\n", SPI_RX_REG);
+#if debug
+  printf("SPI_REG_TX_BUFF_AVAIL[%d]\r\n", SPI_RX_REG);
+  printf("TX Hex1 : ");
+  for(i=0; i<RX_Index; i++)
+  {
+    printf("[%d]%0.2X ",i, RX_BUFFER[i]);
+  }
+  printf("\r\n");
+#endif
+  //printf("trans[%d][%d] : %s\r\n", len, TX_len, data);
+  //printf("trans[%d][%d]\r\n", len, TX_len);
+  if(err==0)
+  {
+    SPI_CS_OFF;
+    if(type)
+    {
+      temp_CMD = SPI_CMD_TX_DATA;
+    }
+    else
+    {
+      temp_CMD = SPI_CMD_TX_CMD;
+    }
+    HAL_SPI_TransmitReceive(&hspi1, &temp_CMD, &dum2, 1, 10);
+    memcpy(SPI_TX_BUFF , &len, sizeof(len));
+    memcpy(SPI_TX_BUFF + 2, data, len);
+    HAL_SPI_TransmitReceive(&hspi1, SPI_TX_BUFF, RX_BUFFER, TX_len, 10);
+
+    SPI_CS_ON;
+    #if 1
+    printf("<<%s",SPI_TX_BUFF + 2);
+    
+    #else
+    printf("%d [%0.2X %0.2X]%s \r\n",TX_len, SPI_TX_BUFF[0], SPI_TX_BUFF[1], SPI_TX_BUFF + 2);
+    #endif
+#if debug
+    printf("TX Hex2 : ");
+    for(i=0; i<TX_len; i++)
+    {
+      printf("[%d]%0.2X ",i, SPI_TX_BUFF[i]);
+    }
+    printf("\r\n");
+#endif
+  }
+  #endif
+}
+// SPI Receive 
+int SPI_RECV(void)
+{
+  #if 1
+  uint8_t temp_CMD, dum = 0xFF, dum2=0x00;
+  uint16_t SPI_RX_REG = 0;
+  
+#if debug1
+  printf("SPI Interrupt input\r\n");
+#endif
+  SPI_CS_OFF;
+  temp_CMD = SPI_REG_INT_STTS;
+  SPI_RX_REG = SPI_Read_Register(temp_CMD);;
+  SPI_CS_ON;
+  if(SPI_RX_REG != 1)
+    return 0;
+#if 0
+  printf("SPI_REG_INT_STTS[%x]\r\n", SPI_RX_REG);
+#endif
+  if((SPI_RX_REG != 0xffff) && (SPI_RX_REG & 0x01))
+  {
+    SPI_CS_OFF;
+    temp_CMD = SPI_REG_RX_DAT_LEN;
+    SPI_RX_REG = SPI_Read_Register(temp_CMD);
+    SPI_CS_ON;
+  }
+#if 0
+    printf("SPI_REG_RX_DAT_LEN[%d]\r\n", SPI_RX_REG);
+#endif
+  if(SPI_RX_REG > 0)
+  {
+    SPI_CS_OFF;
+    temp_CMD = SPI_CMD_RX_DATA;
+    HAL_SPI_TransmitReceive(&hspi1, &temp_CMD, &dum2, 1, 10);
+    HAL_SPI_TransmitReceive(&hspi1, &dum, SPI_RX_BUFF, SPI_RX_REG, 10);
+    SPI_RX_BUFF[SPI_RX_REG] = 0;
+    #if 0
+    for(i=0; i<SPI_RX_REG; i++)
+    {
+      EnQueue(SPI_RX_BUFF[i]);
+    }
+    #endif
+    SPI_CS_ON;
+    #if 1 //teddy 191111
+    #if 0 
+    if(get_Socket_status() == 0)
+    {
+      for(i=0; i<SPI_RX_REG; i++)
+      {
+        EnQueue(SPI_RX_BUFF[i]);
+      }
+    }
+    else
+    {
+      SPI_Input_Data_Proc(SPI_RX_REG, SPI_RX_BUFF);
+    }
+    #endif
+    #else
+    for(i=0; i<SPI_RX_REG; i++)
+    {
+      EnQueue(SPI_RX_BUFF[i]);
+    }
+    #endif
+#if debug1
+    printf("RX Hex : ");
+    for(i=0; i<SPI_RX_REG; i++)
+    {
+      printf("[%d]%0.2X ",i, SPI_RX_BUFF[i]);
+    }
+    printf("\r\n");
+#endif
+    #if 1
+    printf(">>%s",SPI_RX_BUFF);
+    HAL_UART_Transmit(&huart2, (uint8_t *)SPI_RX_BUFF, SPI_RX_REG, 0xFFFF);
+    #else
+    printf("RX[%d]:[%s]\r\n", SPI_RX_REG, SPI_RX_BUFF);
+    //printf("RX[%d]\r\n", SPI_RX_REG);
+    #endif
+    return SPI_RX_REG;
+  }
+  #endif
+  return 0;
+}
+uint16_t  SPI_Read_STTS(void)
+{
+  uint8_t temp_CMD;
+  uint16_t SPI_RX_REG = 0;
+  
+#if debug1
+  printf("SPI Interrupt input\r\n");
+#endif
+  SPI_CS_OFF;
+  temp_CMD = SPI_REG_INT_STTS;
+  SPI_RX_REG = SPI_Read_Register(temp_CMD);;
+  SPI_CS_ON;
+  printf("SPI_INT_STTS %08x\r\n", SPI_RX_REG);
+  SPI_RX_REG = 0;
+  SPI_CS_OFF;
+  temp_CMD = SPI_REG_RX_DAT_LEN;
+  SPI_RX_REG = SPI_Read_Register(temp_CMD);
+  SPI_CS_ON;
+  printf("SPI_RXDATLEN %08x %d\r\n", SPI_RX_REG, SPI_RX_REG);
+  if(SPI_RX_REG > 0)
+  {
+    SPI_RECV();
+  }
+  return 0;
+}
+int CMD_check_mode(void)
+{
+  if(strncmp((char *)RX_BUFFER, "AT+CIPMODE=", 11) == 0)
+  {
+    //CIP MODE
+    if(RX_BUFFER[11]=='1')
+    {
+      //1
+      transmode = 1;
+    }
+    else if(RX_BUFFER[11]=='0')
+    {
+      //0
+      transmode = 0;
+    }
+    else
+    {
+      /* error code */
+      printf("CMD Value Error!!\r\n");
+    }
+  }
+  else if(strncmp((char *)RX_BUFFER, "AT+CIPSEND", 10) == 0)
+  {
+    //send func
+    if(RX_BUFFER[10]=='=')
+    {
+      // CIPSEND
+      sendsize = Int2StrNull((char *)RX_BUFFER+11);
+      if(sendsize > 0)
+      {
+        sendmode = 1;
+      }
+      else
+      {
+        /* error code */
+        printf("CMD SEND SIZE Error!!\r\n");
+      }
+      printf("S:%s I:%d \r\n", RX_BUFFER+11, sendsize);
+    }
+    else if(strncmp((char *)RX_BUFFER+10, "BUF=", 4) == 0)
+    {
+      // CIPSENDBUF
+      sendsize = Int2StrNull((char *)RX_BUFFER+14);
+      if(sendsize > 0)
+      {
+        sendmode = 1;
+      }
+      else
+      {
+        /* error code */
+        printf("CMD SEND BUF SIZE Error!!\r\n");
+      }
+      printf("S:%s I:%d \r\n", RX_BUFFER+11, sendsize);
+    }
+    else if(strncmp((char *)RX_BUFFER+10, "EX=", 3) == 0)
+    {
+      // CIP SENDEX
+      sendsize = Int2StrNull((char *)RX_BUFFER+13);
+      if(sendsize > 0)
+      {
+        sendmode = 1;
+      }
+      else
+      {
+        /* error code */
+        printf("CMD SEND EX SIZE Error!!\r\n");
+      }
+      printf("S:%s I:%d \r\n", RX_BUFFER+11, sendsize);
+    }
+  }
+  return 0;
+}
+int recv_check_message(void)
+{
+  //SPI_RX_BUFF, SPI_RX_REG
+  if(sendmode == 1) //send mode
+  {
+    if(strncmp((char *)SPI_RX_BUFF,"link is not valid", 17) == 0)
+    {
+      printf("send error!! \r\n");
+      sendmode = 0;
+    }
+  }else if(transmode == 0)
+  {//WizFi360_Boot
+    if(strncmp((char *)SPI_RX_BUFF,"\r\nready", 5) == 0)
+    {
+      WizFi360_Boot = 1;
+      TransBootCnt = 0;
+      printf("WizFi360 Boot\r\n");
+    }
+    if(WizFi360_Boot == 1)
+    {
+      TransBootCnt++;
+      if(strncmp((char *)SPI_RX_BUFF,"CONNECT\r\n", 9) == 0)
+      {
+        printf("WizFi360 Server Connect \r\n");
+        if(TransBootCnt < 10)
+        {
+          printf("WizFi360 Transmode start \r\n");
+          transmode = 1;
+        }
+
+      }
+    }
+  }
+	return 0;
+}
 /* USER CODE END 4 */
 
 /**
